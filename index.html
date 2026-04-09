@@ -329,21 +329,20 @@ async function run() {
     const rows = nearbyPuts.map((p, i) => {
       const strike = p.strike;
       const bid = p.bid > 0 ? p.bid : (p.lastPrice || 0);
-      const iv = p.impliedVolatility || 0;
       const pctSpot = (strike / spotPrice * 100);
+      const discountPct = ((spotPrice - (strike - bid)) / spotPrice * 100);
       const contracts = Math.floor(capital / (strike * 100));
       const totalPremium = contracts * bid * 100;
       const holdRet = bid / strike * 100;
       const annRet = actualDTE > 0 ? holdRet * (365 / actualDTE) : 0;
       const breakeven = strike - bid;
-      const protection = ((spotPrice - breakeven) / spotPrice * 100);
       const isActive = i === bestIdx;
 
       return `<tr class="${isActive ? 'active' : ''}">
         <td>$${strike.toFixed(1)}</td>
         <td>${pctSpot.toFixed(1)}%</td>
         <td>$${bid.toFixed(2)}</td>
-        <td>${(iv * 100).toFixed(0)}%</td>
+        <td>${discountPct.toFixed(1)}%</td>
         <td>${contracts}</td>
         <td>$${totalPremium.toLocaleString('en-US', {maximumFractionDigits: 0})}</td>
         <td class="ann">${annRet.toFixed(1)}%</td>
@@ -364,7 +363,7 @@ async function run() {
                 <th>行权价</th>
                 <th>%现价</th>
                 <th>${priceLabel}</th>
-                <th>IV</th>
+                <th>折扣</th>
                 <th>可卖</th>
                 <th>收入</th>
                 <th>年化</th>
