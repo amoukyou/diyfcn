@@ -11,31 +11,51 @@ async function getAuth() {
     return { cookie: cachedCookie, crumb: cachedCrumb };
   }
 
-  // Step 1: get cookies
+  // Step 1: get A3 cookie from Yahoo
   const initRes = await fetch('https://fc.yahoo.com', {
     headers: { 'User-Agent': 'Mozilla/5.0' },
     redirect: 'manual',
   });
-  const setCookie = initRes.headers.get('set-cookie') || '';
-  const cookies = setCookie.split(',').map(c => c.split(';')[0].trim()).join('; ');
 
-  // Step 2: get crumb
+  // Extract A3 cookie
+  const setCookieHeader = initRes.headers.get('set-cookie') || '';
+  const a3Match = setCookieHeader.match(/A3=([^;]+)/);
+  if (!a3Match) throw new Error('Failed to get A3 cookie');
+  const a3Cookie = 'A3=' + a3Match[1];
+
+  // Step 2: get crumb using A3 cookie
   const crumbRes = await fetch('https://query2.finance.yahoo.com/v1/test/getcrumb', {
     headers: {
       'User-Agent': 'Mozilla/5.0',
-      'Cookie': cookies,
+      'Cookie': a3Cookie,
     },
   });
   const crumb = await crumbRes.text();
 
-  if (!crumb || crumb.includes('<')) {
-    throw new Error('Failed to get crumb');
+  if (!crumb || crumb.includes('<') || crumb.includes('{')) {
+    throw new Error('Failed to get crumb: ' + crumb.substring(0, 100));
   }
 
-  cachedCookie = cookies;
+  cachedCookie = a3Cookie;
   cachedCrumb = crumb;
   cacheTime = now;
-  return { cookie: cookies, crumb };
+  return { cookie: a3Cookie, crumb };
+}
+
+async function yahooFetch(type, ticker, date, cookie, crumb) {
+  let yahooUrl;
+  if (type === 'options') {
+    yahooUrl = `https://query1.finance.yahoo.com/v7/finance/options/${ticker}?crumb=${encodeURIComponent(crumb)}`;
+    if (date) yahooUrl += `&date=${date}`;
+  } else {
+    yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?range=1d&interval=1d&crumb=${encodeURIComponent(crumb)}`;
+  }
+  return await fetch(yahooUrl, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0',
+      'Cookie': cookie,
+    },
+  });
 }
 
 function corsHeaders() {
@@ -65,52 +85,25 @@ export default {
     }
 
     try {
-      const { cookie, crumb } = await getAuth();
-
-      let yahooUrl;
-      if (type === 'options') {
-        yahooUrl = `https://query1.finance.yahoo.com/v7/finance/options/${ticker}?crumb=${encodeURIComponent(crumb)}`;
-        if (date) yahooUrl += `&date=${date}`;
-      } else {
-        yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?range=1d&interval=1d&crumb=${encodeURIComponent(crumb)}`;
-      }
-
-      const resp = await fetch(yahooUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0',
-          'Cookie': cookie,
-        },
-      });
+      let { cookie, crumb } = await getAuth();
+      let resp = await yahooFetch(type, ticker, date, cookie, crumb);
 
       // If 401, invalidate cache and retry once
       if (resp.status === 401) {
         cachedCookie = null;
         cachedCrumb = null;
         const auth2 = await getAuth();
-        let retryUrl;
-        if (type === 'options') {
-          retryUrl = `https://query1.finance.yahoo.com/v7/finance/options/${ticker}?crumb=${encodeURIComponent(auth2.crumb)}`;
-          if (date) retryUrl += `&date=${date}`;
-        } else {
-          retryUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?range=1d&interval=1d&crumb=${encodeURIComponent(auth2.crumb)}`;
-        }
-        const resp2 = await fetch(retryUrl, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0',
-            'Cookie': auth2.cookie,
-          },
-        });
-        const data2 = await resp2.text();
-        return new Response(data2, {
-          status: resp2.status,
-          headers: { ...corsHeaders(), 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=60' },
-        });
+        resp = await yahooFetch(type, ticker, date, auth2.cookie, auth2.crumb);
       }
 
       const data = await resp.text();
       return new Response(data, {
         status: resp.status,
-        headers: { ...corsHeaders(), 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=60' },
+        headers: {
+          ...corsHeaders(),
+          'Content-Type': 'application/json',
+          'Cache-Control': 'public, max-age=60',
+        },
       });
     } catch (e) {
       return new Response(JSON.stringify({ error: e.message }), {
