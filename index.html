@@ -157,9 +157,16 @@
     </div>
   </div>
 
-  <div class="form-group">
-    <label>打算投资多少 ($)</label>
-    <input type="number" id="capital" placeholder="例: 50000" step="100">
+  <div class="row">
+    <div class="form-group" style="flex:2">
+      <label>打算投资多少 ($)</label>
+      <input type="number" id="capital" placeholder="例: 50000" step="100">
+    </div>
+    <div class="form-group" style="flex:1">
+      <label>手续费/张 ($)</label>
+      <input type="number" id="feePerContract" placeholder="1.19" step="0.01" value="1.19">
+      <div class="hint">富途默认 $1.19</div>
+    </div>
   </div>
 
   <button class="btn" id="calcBtn" onclick="run()">计算</button>
@@ -264,6 +271,7 @@ async function run() {
   const discount = parseFloat(document.getElementById('discount').value);
   const months = parseFloat(document.getElementById('months').value);
   const capital = parseFloat(document.getElementById('capital').value);
+  const feePerContract = parseFloat(document.getElementById('feePerContract').value) || 1.19;
 
   if (!ticker || !spotPrice) {
     output.innerHTML = '<div class="error-box">请先输入有效的股票代码，等待现价获取成功</div>';
@@ -333,8 +341,10 @@ async function run() {
       const discountPct = ((spotPrice - (strike - bid)) / spotPrice * 100);
       const contracts = Math.floor(capital / (strike * 100));
       const totalPremium = contracts * bid * 100;
-      const annRet = actualDTE > 0 ? (totalPremium / actualDTE) * 365 / capital * 100 : 0;
-      const breakeven = strike - bid;
+      const totalFee = contracts * feePerContract;
+      const netPremium = totalPremium - totalFee;
+      const annRet = actualDTE > 0 && netPremium > 0 ? (netPremium / actualDTE) * 365 / capital * 100 : 0;
+      const breakeven = strike - bid + feePerContract / 100;
       const isActive = i === bestIdx;
 
       return `<tr class="${isActive ? 'active' : ''}">
@@ -343,7 +353,7 @@ async function run() {
         <td>$${bid.toFixed(2)}</td>
         <td>${discountPct.toFixed(1)}%</td>
         <td>${contracts}</td>
-        <td>$${totalPremium.toLocaleString('en-US', {maximumFractionDigits: 0})}</td>
+        <td>$${netPremium.toLocaleString('en-US', {maximumFractionDigits: 0})}</td>
         <td class="ann">${annRet.toFixed(1)}%</td>
         <td>$${breakeven.toFixed(1)}</td>
       </tr>`;
@@ -364,7 +374,7 @@ async function run() {
                 <th>${priceLabel}</th>
                 <th>折扣</th>
                 <th>可卖</th>
-                <th>收入</th>
+                <th>净收入</th>
                 <th>年化</th>
                 <th>保本价</th>
               </tr>
