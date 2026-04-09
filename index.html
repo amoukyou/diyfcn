@@ -116,9 +116,9 @@
 
   <div class="row">
     <div class="form-group">
-      <label>折扣 Discount (%)</label>
-      <input type="number" id="discount" placeholder="例: 10" step="1" value="10">
-      <div class="hint">行权价 = 现价 × (1 - 折扣%)</div>
+      <label>接股价 (%现价)</label>
+      <input type="number" id="discount" placeholder="例: 90" step="1" value="90">
+      <div class="hint">行权价 = 现价 × 接股价%</div>
     </div>
     <div class="form-group">
       <label>期限 (月)</label>
@@ -256,8 +256,8 @@ async function run() {
     output.innerHTML = '<div class="error-box">请先输入有效的股票代码，等待现价获取成功</div>';
     return;
   }
-  if (!discount || discount <= 0 || discount >= 100) {
-    output.innerHTML = '<div class="error-box">请输入合理的折扣（1-99%）</div>';
+  if (!discount || discount <= 0 || discount > 100) {
+    output.innerHTML = '<div class="error-box">请输入合理的接股价（1-100%）</div>';
     return;
   }
   if (!months || months <= 0) {
@@ -274,7 +274,7 @@ async function run() {
   btn.className = 'btn loading';
 
   try {
-    const targetStrike = spotPrice * (1 - discount / 100);
+    const targetStrike = spotPrice * (discount / 100);
     const targetDTE = Math.round(months * 30.4);
     const now = Math.floor(Date.now() / 1000);
     const targetEpoch = now + targetDTE * 86400;
@@ -340,7 +340,7 @@ async function run() {
           </div>
           <div class="result-row">
             <span class="lbl">实际行权价</span>
-            <span class="val">$${actualStrike.toFixed(2)} <span class="sub">折扣 ${actualDiscount.toFixed(1)}%（目标 ${discount}%）</span></span>
+            <span class="val">$${actualStrike.toFixed(2)} <span class="sub">现价的 ${(100 - actualDiscount).toFixed(1)}%（目标 ${discount}%）</span></span>
           </div>
           <div class="result-row">
             <span class="lbl">期权报价 Bid / Ask</span>
