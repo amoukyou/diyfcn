@@ -101,6 +101,37 @@
     border-left: 3px solid #f85149;
     font-size: 13px; color: #f85149; line-height: 1.6;
   }
+  /* Strike comparison table */
+  .strike-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .strike-table th {
+    text-align: left;
+    padding: 8px 6px;
+    color: #8b949e;
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid #30363d;
+    white-space: nowrap;
+  }
+  .strike-table th:not(:first-child),
+  .strike-table td:not(:first-child) { text-align: right; }
+  .strike-table td {
+    padding: 10px 6px;
+    border-bottom: 1px solid #21262d;
+    color: #e1e4e8;
+    white-space: nowrap;
+  }
+  .strike-table tr:last-child td { border-bottom: none; }
+  .strike-table tr.active {
+    background: #1c3a2a;
+  }
+  .strike-table tr.active td { color: #3fb950; font-weight: 700; }
+  .strike-table .ann { color: #3fb950; font-weight: 700; }
 </style>
 </head>
 <body>
@@ -217,14 +248,13 @@ function findNearestExpiry(expirations, targetEpoch) {
   return best;
 }
 
-function findNearestStrikePut(puts, targetStrike) {
-  let best = null;
-  let bestDiff = Infinity;
-  for (const p of puts) {
-    const diff = Math.abs(p.strike - targetStrike);
-    if (diff < bestDiff) { bestDiff = diff; best = p; }
-  }
-  return best;
+function findNearbyPuts(puts, targetStrike, count = 5) {
+  // Sort by distance to target, pick nearest `count`
+  const sorted = [...puts].sort((a, b) => Math.abs(a.strike - targetStrike) - Math.abs(b.strike - targetStrike));
+  const nearby = sorted.slice(0, count);
+  // Re-sort by strike descending (higher strike = more aggressive)
+  nearby.sort((a, b) => b.strike - a.strike);
+  return nearby;
 }
 
 async function run() {
@@ -278,87 +308,71 @@ async function run() {
       throw new Error('该到期日没有Put期权数据');
     }
 
-    const bestPut = findNearestStrikePut(puts, targetStrike);
-    const actualStrike = bestPut.strike;
-    const premium = bestPut.lastPrice || bestPut.ask || 0;
-    const bid = bestPut.bid || 0;
-    const ask = bestPut.ask || 0;
-    const mid = bid > 0 && ask > 0 ? (bid + ask) / 2 : premium;
-    const iv = bestPut.impliedVolatility || 0;
-
+    const nearbyPuts = findNearbyPuts(puts, targetStrike, 7);
     const expiryDate = new Date(bestExpiry * 1000);
     const actualDTE = Math.round((bestExpiry - now) / 86400);
-
-    // Calculations
-    const marginPerContract = actualStrike * 100;
-    const contracts = Math.floor(capital / marginPerContract);
-
-    if (contracts < 1) {
-      throw new Error(`本金不足：需要至少 $${marginPerContract.toLocaleString()} 才能卖1张（行权价 $${actualStrike} × 100股）`);
-    }
-
-    const totalMargin = contracts * marginPerContract;
-    const totalPremiumMid = contracts * mid * 100;
-    const totalPremiumBid = contracts * bid * 100;
-    const holdReturn = mid / actualStrike * 100;
-    const annReturn = holdReturn * (365 / actualDTE);
-    const actualDiscount = ((spotPrice - actualStrike) / spotPrice * 100);
-    const breakeven = actualStrike - mid;
-    const maxProtection = ((spotPrice - breakeven) / spotPrice * 100);
-    const remainCash = capital - totalMargin;
-
     const expiryStr = expiryDate.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+
+    // Check if market is open (any put has bid > 0)
+    const marketOpen = nearbyPuts.some(p => p.bid > 0);
+    const priceLabel = marketOpen ? 'Bid' : 'Last';
+
+    // Find which strike is closest to target
+    let bestIdx = 0;
+    let bestDiff = Infinity;
+    nearbyPuts.forEach((p, i) => {
+      const diff = Math.abs(p.strike - targetStrike);
+      if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+    });
+
+    // Build table rows
+    const rows = nearbyPuts.map((p, i) => {
+      const strike = p.strike;
+      const bid = p.bid > 0 ? p.bid : (p.lastPrice || 0);
+      const iv = p.impliedVolatility || 0;
+      const pctSpot = (strike / spotPrice * 100);
+      const contracts = Math.floor(capital / (strike * 100));
+      const totalPremium = contracts * bid * 100;
+      const holdRet = bid / strike * 100;
+      const annRet = actualDTE > 0 ? holdRet * (365 / actualDTE) : 0;
+      const breakeven = strike - bid;
+      const protection = ((spotPrice - breakeven) / spotPrice * 100);
+      const isActive = i === bestIdx;
+
+      return `<tr class="${isActive ? 'active' : ''}">
+        <td>$${strike.toFixed(1)}</td>
+        <td>${pctSpot.toFixed(1)}%</td>
+        <td>$${bid.toFixed(2)}</td>
+        <td>${(iv * 100).toFixed(0)}%</td>
+        <td>${contracts}</td>
+        <td>$${totalPremium.toLocaleString('en-US', {maximumFractionDigits: 0})}</td>
+        <td class="ann">${annRet.toFixed(1)}%</td>
+        <td>$${breakeven.toFixed(1)}</td>
+      </tr>`;
+    }).join('');
 
     output.innerHTML = `
       <div class="results">
         <div class="results-header">
-          <span class="ticker-badge">${ticker} PUT $${actualStrike}</span>
-          <span class="spot-price">现价 $${spotPrice.toFixed(2)} | 到期 ${expiryStr}</span>
+          <span class="ticker-badge">${ticker} Sell Put</span>
+          <span class="spot-price">现价 $${spotPrice.toFixed(2)} | 到期 ${expiryStr} (${actualDTE}天)</span>
         </div>
-        <div class="results-body">
-          <div class="section-title">匹配参数</div>
-          <div class="result-row">
-            <span class="lbl">到期天数</span>
-            <span class="val">${actualDTE} 天 <span class="sub">目标 ${targetDTE} 天 (${months}个月)</span></span>
-          </div>
-          <div class="result-row">
-            <span class="lbl">实际行权价</span>
-            <span class="val">$${actualStrike.toFixed(2)} <span class="sub">现价的 ${(100 - actualDiscount).toFixed(1)}%（目标 ${discount}%）</span></span>
-          </div>
-          <div class="result-row">
-            <span class="lbl">期权报价 Bid / Ask</span>
-            <span class="val">$${bid.toFixed(2)} / $${ask.toFixed(2)} <span class="sub">中间价 $${mid.toFixed(2)} | IV ${(iv*100).toFixed(0)}%</span></span>
-          </div>
-
-          <div class="divider"></div>
-          <div class="section-title">投资计算</div>
-          <div class="result-row">
-            <span class="lbl">可卖合约数</span>
-            <span class="val">${contracts} 张 <span class="sub">每张保证金 $${marginPerContract.toLocaleString()}</span></span>
-          </div>
-          <div class="result-row">
-            <span class="lbl">占用保证金</span>
-            <span class="val">$${totalMargin.toLocaleString()} <span class="sub">剩余现金 $${remainCash.toLocaleString()}</span></span>
-          </div>
-          <div class="result-row">
-            <span class="lbl">收取期权金（票息）</span>
-            <span class="val green">$${totalPremiumMid.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',')} <span class="sub">按中间价 | Bid价 $${totalPremiumBid.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ',')}</span></span>
-          </div>
-
-          <div class="divider"></div>
-          <div class="section-title">收益分析</div>
-          <div class="result-row">
-            <span class="lbl">持有期收益率</span>
-            <span class="val green">${holdReturn.toFixed(2)}%<span class="sub">${actualDTE}天</span></span>
-          </div>
-          <div class="result-row">
-            <span class="lbl">年化收益率</span>
-            <span class="val big">${annReturn.toFixed(2)}%</span>
-          </div>
-          <div class="result-row">
-            <span class="lbl">盈亏平衡价</span>
-            <span class="val">$${breakeven.toFixed(2)} <span class="sub">低于现价 ${maxProtection.toFixed(1)}%</span></span>
-          </div>
+        <div class="results-body" style="padding:12px 12px; overflow-x:auto;">
+          <table class="strike-table">
+            <thead>
+              <tr>
+                <th>行权价</th>
+                <th>%现价</th>
+                <th>${priceLabel}</th>
+                <th>IV</th>
+                <th>可卖</th>
+                <th>收入</th>
+                <th>年化</th>
+                <th>保本价</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
         </div>
       </div>
     `;
