@@ -24,19 +24,18 @@
     color: #8b949e; margin-bottom: 6px;
     text-transform: uppercase; letter-spacing: 0.5px;
   }
-  input, select {
+  input {
     width: 100%; padding: 12px 14px; font-size: 18px;
     background: #161b22; border: 1px solid #30363d;
     border-radius: 8px; color: #fff; outline: none;
     transition: border-color 0.2s;
   }
-  input:focus, select:focus { border-color: #58a6ff; }
+  input:focus { border-color: #58a6ff; }
   input::placeholder { color: #484f58; }
   .row { display: flex; gap: 12px; }
   .row .form-group { flex: 1; }
   .hint { font-size: 12px; color: #484f58; margin-top: 4px; }
   .hint.ok { color: #3fb950; }
-  .hint.warn { color: #d29922; }
   .hint.err { color: #f85149; }
 
   .btn {
@@ -64,44 +63,7 @@
   .results-header .spot-price {
     font-size: 14px; color: #8b949e;
   }
-  .results-body { padding: 8px 20px; }
 
-  .result-row {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 12px 0; border-bottom: 1px solid #21262d;
-  }
-  .result-row:last-child { border-bottom: none; }
-  .result-row .lbl { font-size: 14px; color: #8b949e; }
-  .result-row .val { font-size: 18px; font-weight: 700; color: #e1e4e8; text-align: right; }
-  .result-row .val.green { color: #3fb950; }
-  .result-row .val.big { font-size: 26px; color: #3fb950; }
-  .result-row .val .sub { font-size: 12px; color: #8b949e; font-weight: 400; display: block; }
-
-  .section-title {
-    font-size: 11px; font-weight: 700; color: #58a6ff;
-    text-transform: uppercase; letter-spacing: 1px;
-    padding: 14px 0 4px; border-bottom: none;
-  }
-
-  .divider { height: 1px; background: #30363d; margin: 0; }
-
-  .note {
-    margin-top: 20px; padding: 14px 16px;
-    background: #1c2128; border-radius: 8px;
-    border-left: 3px solid #58a6ff;
-    font-size: 13px; color: #8b949e; line-height: 1.7;
-  }
-  .note code {
-    background: #30363d; padding: 2px 6px; border-radius: 4px;
-    font-size: 12px; color: #e1e4e8;
-  }
-  .error-box {
-    margin-top: 20px; padding: 14px 16px;
-    background: #1c2128; border-radius: 8px;
-    border-left: 3px solid #f85149;
-    font-size: 13px; color: #f85149; line-height: 1.6;
-  }
-  /* Strike comparison table */
   .strike-table {
     width: 100%;
     border-collapse: collapse;
@@ -127,17 +89,33 @@
     white-space: nowrap;
   }
   .strike-table tr:last-child td { border-bottom: none; }
-  .strike-table tr.active {
-    background: #1c3a2a;
-  }
+  .strike-table tr.active { background: #1c3a2a; }
   .strike-table tr.active td { color: #3fb950; font-weight: 700; }
   .strike-table .ann { color: #3fb950; font-weight: 700; }
+  .strike-table tr.dim td { color: #484f58; }
+
+  .note {
+    margin-top: 20px; padding: 14px 16px;
+    background: #1c2128; border-radius: 8px;
+    border-left: 3px solid #58a6ff;
+    font-size: 13px; color: #8b949e; line-height: 1.7;
+  }
+  .note code {
+    background: #30363d; padding: 2px 6px; border-radius: 4px;
+    font-size: 12px; color: #e1e4e8;
+  }
+  .error-box {
+    margin-top: 20px; padding: 14px 16px;
+    background: #1c2128; border-radius: 8px;
+    border-left: 3px solid #f85149;
+    font-size: 13px; color: #f85149; line-height: 1.6;
+  }
 </style>
 </head>
 <body>
 <div class="container">
   <h1>FCN票据DIY计算器</h1>
-  <p class="subtitle">输入标的、折扣、期限、本金 → 自动查询期权链并计算年化收益</p>
+  <p class="subtitle">输入标的、接股价、期限、本金 → 自动查询期权链并计算年化收益</p>
 
   <div class="form-group">
     <label>股票代码 Ticker</label>
@@ -176,18 +154,18 @@
   <div class="note">
     <strong>原理：</strong>Sell Put 并存入 <code>行权价 × 100 × 合约数</code> 现金作为100%保证金，
     相当于自制一张FCN票据。期权金 = 票息，到期OTM则全额收回本金+票息。<br>
-    <code>年化 = (总权利金 / 天数) × 365 / 总本金</code>
+    <code>净收入 = 总权利金 - 手续费</code><br>
+    <code>年化 = (净收入 / 天数) × 365 / 本金</code><br>
+    <code>保本价 = 行权价 - 权利金 + 手续费/100</code>
   </div>
 </div>
 
 <script>
 // ---- API Config ----
-// Auto-detect: local server (python server.py) or Cloudflare Worker
 const LOCAL_API = '/api';
 const WORKER_URL = 'https://fcn-api.btcmini.workers.dev';
 
 async function apiFetch(type, ticker, date) {
-  // Try local server first (when running via python server.py)
   const apis = [LOCAL_API, WORKER_URL];
   for (const base of apis) {
     try {
@@ -196,7 +174,6 @@ async function apiFetch(type, ticker, date) {
       const res = await fetch(url);
       if (!res.ok) continue;
       const data = await res.json();
-      // Check for Yahoo auth errors
       if (data.finance && data.finance.error) continue;
       return data;
     } catch { continue; }
@@ -255,11 +232,9 @@ function findNearestExpiry(expirations, targetEpoch) {
   return best;
 }
 
-function findNearbyPuts(puts, targetStrike, count = 5) {
-  // Sort by distance to target, pick nearest `count`
+function findNearbyPuts(puts, targetStrike, count = 7) {
   const sorted = [...puts].sort((a, b) => Math.abs(a.strike - targetStrike) - Math.abs(b.strike - targetStrike));
   const nearby = sorted.slice(0, count);
-  // Re-sort by strike descending (higher strike = more aggressive)
   nearby.sort((a, b) => b.strike - a.strike);
   return nearby;
 }
@@ -300,7 +275,6 @@ async function run() {
     const now = Math.floor(Date.now() / 1000);
     const targetEpoch = now + targetDTE * 86400;
 
-    // Fetch option chain
     const chain = await fetchOptionChain(ticker);
     const expirations = chain.expirationDates;
 
@@ -333,29 +307,33 @@ async function run() {
       if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
     });
 
+    const feePerShare = feePerContract / 100;
+
     // Build table rows
     const rows = nearbyPuts.map((p, i) => {
       const strike = p.strike;
       const bid = p.bid > 0 ? p.bid : (p.lastPrice || 0);
       const pctSpot = (strike / spotPrice * 100);
-      const discountPct = ((spotPrice - (strike - bid)) / spotPrice * 100);
       const contracts = Math.floor(capital / (strike * 100));
       const totalPremium = contracts * bid * 100;
       const totalFee = contracts * feePerContract;
       const netPremium = totalPremium - totalFee;
-      const annRet = actualDTE > 0 && netPremium > 0 ? (netPremium / actualDTE) * 365 / capital * 100 : 0;
-      const breakeven = strike - bid + feePerContract / 100;
+      const breakeven = strike - bid + feePerShare;
+      const effectiveDiscount = ((spotPrice - breakeven) / spotPrice * 100);
+      const annRet = (actualDTE > 0 && contracts > 0 && netPremium > 0)
+        ? (netPremium / actualDTE) * 365 / capital * 100 : 0;
       const isActive = i === bestIdx;
+      const isDim = contracts === 0;
 
-      return `<tr class="${isActive ? 'active' : ''}">
+      return `<tr class="${isActive ? 'active' : ''} ${isDim ? 'dim' : ''}">
         <td>$${strike.toFixed(1)}</td>
         <td>${pctSpot.toFixed(1)}%</td>
         <td>$${bid.toFixed(2)}</td>
-        <td>${discountPct.toFixed(1)}%</td>
+        <td>${effectiveDiscount.toFixed(1)}%</td>
         <td>${contracts}</td>
-        <td>$${netPremium.toLocaleString('en-US', {maximumFractionDigits: 0})}</td>
-        <td class="ann">${annRet.toFixed(1)}%</td>
-        <td>$${breakeven.toFixed(1)}</td>
+        <td>${netPremium > 0 ? '$' + netPremium.toLocaleString('en-US', {maximumFractionDigits: 0}) : '-'}</td>
+        <td class="ann">${annRet > 0 ? annRet.toFixed(1) + '%' : '-'}</td>
+        <td>$${breakeven.toFixed(2)}</td>
       </tr>`;
     }).join('');
 
@@ -365,7 +343,7 @@ async function run() {
           <span class="ticker-badge">${ticker} Sell Put</span>
           <span class="spot-price">现价 $${spotPrice.toFixed(2)} | 到期 ${expiryStr} (${actualDTE}天)</span>
         </div>
-        <div class="results-body" style="padding:12px 12px; overflow-x:auto;">
+        <div style="padding:12px; overflow-x:auto;">
           <table class="strike-table">
             <thead>
               <tr>
