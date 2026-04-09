@@ -144,43 +144,26 @@
 
 <script>
 // ---- API Config ----
-// Set your Cloudflare Worker URL here after deploying worker.js
-// e.g. 'https://fcn-api.your-name.workers.dev'
+// Auto-detect: local server (python server.py) or Cloudflare Worker
+const LOCAL_API = '/api';
 const WORKER_URL = 'https://fcn-api.btcmini.workers.dev';
 
-// Fallback CORS proxies for local development
-const PROXIES = [
-  (u) => `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`,
-  (u) => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
-];
-
 async function apiFetch(type, ticker, date) {
-  // Prefer Cloudflare Worker if configured
-  if (WORKER_URL) {
-    let url = `${WORKER_URL}?ticker=${ticker}&type=${type}`;
-    if (date) url += `&date=${date}`;
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`API error ${res.status}`);
-    return await res.json();
-  }
-
-  // Fallback: CORS proxy
-  let rawUrl;
-  if (type === 'options') {
-    rawUrl = `https://query1.finance.yahoo.com/v7/finance/options/${ticker}`;
-    if (date) rawUrl += `?date=${date}`;
-  } else {
-    rawUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?range=1d&interval=1d`;
-  }
-
-  for (const mkUrl of PROXIES) {
+  // Try local server first (when running via python server.py)
+  const apis = [LOCAL_API, WORKER_URL];
+  for (const base of apis) {
     try {
-      const res = await fetch(mkUrl(rawUrl));
+      let url = `${base}?ticker=${ticker}&type=${type}`;
+      if (date) url += `&date=${date}`;
+      const res = await fetch(url);
       if (!res.ok) continue;
-      return await res.json();
+      const data = await res.json();
+      // Check for Yahoo auth errors
+      if (data.finance && data.finance.error) continue;
+      return data;
     } catch { continue; }
   }
-  throw new Error('网络请求失败，请稍后重试');
+  throw new Error('数据获取失败，请确认 python server.py 正在运行');
 }
 
 let tickerTimer = null;
