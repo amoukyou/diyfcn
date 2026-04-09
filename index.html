@@ -169,7 +169,7 @@
   <div class="note">
     <strong>原理：</strong>Sell Put 并存入 <code>行权价 × 100 × 合约数</code> 现金作为100%保证金，
     相当于自制一张FCN票据。期权金 = 票息，到期OTM则全额收回本金+票息。<br>
-    <code>年化 = (期权金 / 行权价) × (365 / 天数)</code>
+    <code>年化 = (总权利金 / 天数) × 365 / 总本金</code>
   </div>
 </div>
 
@@ -333,8 +333,7 @@ async function run() {
       const discountPct = ((spotPrice - (strike - bid)) / spotPrice * 100);
       const contracts = Math.floor(capital / (strike * 100));
       const totalPremium = contracts * bid * 100;
-      const holdRet = bid / strike * 100;
-      const annRet = actualDTE > 0 ? holdRet * (365 / actualDTE) : 0;
+      const annRet = actualDTE > 0 ? (totalPremium / actualDTE) * 365 / capital * 100 : 0;
       const breakeven = strike - bid;
       const isActive = i === bestIdx;
 
