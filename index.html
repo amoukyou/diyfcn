@@ -161,24 +161,15 @@
 </div>
 
 <script>
-// ---- API Config ----
-const LOCAL_API = '/api';
-const WORKER_URL = 'https://fcn-api.btcmini.workers.dev';
+const API = '/api';
 
-async function apiFetch(type, ticker, date) {
-  const apis = [LOCAL_API, WORKER_URL];
-  for (const base of apis) {
-    try {
-      let url = `${base}?ticker=${ticker}&type=${type}`;
-      if (date) url += `&date=${date}`;
-      const res = await fetch(url);
-      if (!res.ok) continue;
-      const data = await res.json();
-      if (data.finance && data.finance.error) continue;
-      return data;
-    } catch { continue; }
-  }
-  throw new Error('数据获取失败，请确认 python server.py 正在运行');
+async function api(type, ticker, date) {
+  let url = `${API}?ticker=${ticker}&type=${type}`;
+  if (date) url += `&date=${date}`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return data;
 }
 
 let tickerTimer = null;
@@ -198,12 +189,9 @@ function onTickerInput() {
 async function fetchSpot(ticker) {
   const hint = document.getElementById('tickerHint');
   try {
-    const data = await apiFetch('quote', ticker);
-    const r = data.chart.result;
-    if (!r || !r.length) throw new Error('未找到');
-    spotPrice = r[0].meta.regularMarketPrice;
-    const name = r[0].meta.shortName || r[0].meta.symbol;
-    hint.textContent = `${name}  现价 $${spotPrice.toFixed(2)}`;
+    const data = await api('quote', ticker);
+    spotPrice = data.price;
+    hint.textContent = `${data.name}  现价 $${spotPrice.toFixed(2)}`;
     hint.className = 'hint ok';
   } catch(e) {
     hint.textContent = '未找到该股票：' + e.message;
@@ -212,22 +200,13 @@ async function fetchSpot(ticker) {
   }
 }
 
-async function fetchOptionChain(ticker) {
-  const data = await apiFetch('options', ticker);
-  return data.optionChain.result[0];
-}
-
-async function fetchOptionForDate(ticker, epoch) {
-  const data = await apiFetch('options', ticker, epoch);
-  return data.optionChain.result[0];
-}
-
-function findNearestExpiry(expirations, targetEpoch) {
-  let best = expirations[0];
-  let bestDiff = Math.abs(expirations[0] - targetEpoch);
-  for (const exp of expirations) {
-    const diff = Math.abs(exp - targetEpoch);
-    if (diff < bestDiff) { bestDiff = diff; best = exp; }
+function findNearestDate(dates, targetDate) {
+  // dates = ['2026-04-10', ...], targetDate = '2026-05-10'
+  let best = dates[0];
+  let bestDiff = Math.abs(new Date(dates[0]) - new Date(targetDate));
+  for (const d of dates) {
+    const diff = Math.abs(new Date(d) - new Date(targetDate));
+    if (diff < bestDiff) { bestDiff = diff; best = d; }
   }
   return best;
 }
@@ -272,28 +251,32 @@ async function run() {
   try {
     const targetStrike = spotPrice * (discount / 100);
     const targetDTE = Math.round(months * 30.4);
-    const now = Math.floor(Date.now() / 1000);
-    const targetEpoch = now + targetDTE * 86400;
+    const now = new Date();
+    const targetDate = new Date(now.getTime() + targetDTE * 86400000);
+    const targetDateStr = targetDate.toISOString().slice(0, 10);
 
-    const chain = await fetchOptionChain(ticker);
-    const expirations = chain.expirationDates;
+    // Fetch expirations
+    const expData = await api('expirations', ticker);
+    const expirations = expData.expirations;
 
     if (!expirations || !expirations.length) {
       throw new Error('该标的没有可用的期权数据');
     }
 
-    const bestExpiry = findNearestExpiry(expirations, targetEpoch);
-    const expiryData = await fetchOptionForDate(ticker, bestExpiry);
-    const puts = expiryData.options[0].puts;
+    const bestExpiry = findNearestDate(expirations, targetDateStr);
+
+    // Fetch option chain for this date
+    const chainData = await api('options', ticker, bestExpiry);
+    const puts = chainData.puts;
 
     if (!puts || !puts.length) {
       throw new Error('该到期日没有Put期权数据');
     }
 
     const nearbyPuts = findNearbyPuts(puts, targetStrike, 7);
-    const expiryDate = new Date(bestExpiry * 1000);
-    const actualDTE = Math.round((bestExpiry - now) / 86400);
-    const expiryStr = expiryDate.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+    const expiryDate = new Date(bestExpiry + 'T00:00:00');
+    const actualDTE = Math.round((expiryDate - now) / 86400000);
+    const expiryStr = bestExpiry;
 
     const priceLabel = 'Ask';
 
