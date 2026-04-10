@@ -295,9 +295,7 @@ async function run() {
     const actualDTE = Math.round((bestExpiry - now) / 86400);
     const expiryStr = expiryDate.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
 
-    // Check if market is open (any put has bid > 0)
-    const marketOpen = nearbyPuts.some(p => p.bid > 0);
-    const priceLabel = marketOpen ? 'Bid' : 'Last';
+    const priceLabel = 'Ask';
 
     // Find which strike is closest to target
     let bestIdx = 0;
@@ -312,13 +310,23 @@ async function run() {
     // Build table rows
     const rows = nearbyPuts.map((p, i) => {
       const strike = p.strike;
-      const bid = p.bid > 0 ? p.bid : (p.lastPrice || 0);
+      const ask = p.ask > 0 ? p.ask : 0;
       const pctSpot = (strike / spotPrice * 100);
+
+      if (!ask) {
+        const isActive = i === bestIdx;
+        return `<tr class="${isActive ? 'active' : ''} dim">
+          <td>$${strike.toFixed(1)}</td>
+          <td>${pctSpot.toFixed(1)}%</td>
+          <td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>
+        </tr>`;
+      }
+
       const contracts = Math.floor(capital / (strike * 100));
-      const totalPremium = contracts * bid * 100;
+      const totalPremium = contracts * ask * 100;
       const totalFee = contracts * feePerContract;
       const netPremium = totalPremium - totalFee;
-      const breakeven = strike - bid + feePerShare;
+      const breakeven = strike - ask + feePerShare;
       const effectiveDiscount = ((spotPrice - breakeven) / spotPrice * 100);
       const annRet = (actualDTE > 0 && contracts > 0 && netPremium > 0)
         ? (netPremium / actualDTE) * 365 / capital * 100 : 0;
@@ -328,7 +336,7 @@ async function run() {
       return `<tr class="${isActive ? 'active' : ''} ${isDim ? 'dim' : ''}">
         <td>$${strike.toFixed(1)}</td>
         <td>${pctSpot.toFixed(1)}%</td>
-        <td>$${bid.toFixed(2)}</td>
+        <td>$${ask.toFixed(2)}</td>
         <td>${effectiveDiscount.toFixed(1)}%</td>
         <td>${contracts}</td>
         <td>${netPremium > 0 ? '$' + netPremium.toLocaleString('en-US', {maximumFractionDigits: 0}) : '-'}</td>
