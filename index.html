@@ -265,18 +265,19 @@ async function run() {
 
     const bestExpiry = findNearestDate(expirations, targetDateStr);
 
-    // Fetch option chain for this date
+    // Fetch option chain for this date (server may snap to nearest available)
     const chainData = await api('options', ticker, bestExpiry);
     const puts = chainData.puts;
+    const actualExpiry = chainData.expiry || bestExpiry;
 
     if (!puts || !puts.length) {
       throw new Error('该到期日没有Put期权数据');
     }
 
     const nearbyPuts = findNearbyPuts(puts, targetStrike, 7);
-    const expiryDate = new Date(bestExpiry + 'T00:00:00');
+    const expiryDate = new Date(actualExpiry + 'T00:00:00');
     const actualDTE = Math.round((expiryDate - now) / 86400000);
-    const expiryStr = bestExpiry;
+    const expiryStr = actualExpiry;
 
     const priceLabel = 'Bid';
 

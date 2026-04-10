@@ -104,12 +104,26 @@ def futu_option_chain(ticker, expiry_date):
     from futu import OpenQuoteContext, RET_OK, OptionType
     ctx = OpenQuoteContext(host='127.0.0.1', port=11111)
 
-    # Get put option codes for this expiry
+    # Try exact date first, then find nearest available
     ret, chain = ctx.get_option_chain(
         f'US.{ticker}',
         start=expiry_date, end=expiry_date,
         option_type=OptionType.PUT
     )
+    if (ret != RET_OK or chain.empty):
+        # Find nearest available expiry
+        ret2, exp_data = ctx.get_option_expiration_date(f'US.{ticker}')
+        if ret2 == RET_OK and not exp_data.empty:
+            from datetime import datetime
+            target = datetime.strptime(expiry_date, '%Y-%m-%d')
+            dates = exp_data['strike_time'].tolist()
+            nearest = min(dates, key=lambda d: abs(datetime.strptime(d, '%Y-%m-%d') - target))
+            ret, chain = ctx.get_option_chain(
+                f'US.{ticker}',
+                start=nearest, end=nearest,
+                option_type=OptionType.PUT
+            )
+            expiry_date = nearest
     if ret != RET_OK or chain.empty:
         ctx.close()
         raise Exception(f'No options for {expiry_date}')
@@ -137,7 +151,7 @@ def futu_option_chain(ticker, expiry_date):
         })
 
     puts.sort(key=lambda p: p['strike'])
-    return puts
+    return {'puts': puts, 'expiry': expiry_date}
 
 # ---- Yahoo fallback for options ----
 def yahoo_option_expirations(ticker):
@@ -215,10 +229,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                         self._json({'error': 'Missing date param (YYYY-MM-DD)'}, 400)
                         return
                     if check_futu():
-                        puts = futu_option_chain(ticker, date)
+                        result = futu_option_chain(ticker, date)
+                        self._json(result)
                     else:
                         puts = yahoo_option_chain(ticker, date)
-                    self._json({'puts': puts})
+                        self._json({'puts': puts, 'expiry': date})
 
                 else:
                     self._json({'error': f'Unknown type: {api_type}'}, 400)
